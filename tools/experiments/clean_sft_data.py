@@ -58,24 +58,36 @@ def save_jsonl(rows: list[dict], filepath: str):
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _tv(turn) -> str:
+    """Extract text from a turn (dict or string)."""
+    if isinstance(turn, dict):
+        return turn.get("value", turn.get("content", ""))
+    return str(turn)
+
+
+def _tr(turn) -> str:
+    """Extract role from a turn (dict or string)."""
+    if isinstance(turn, dict):
+        return turn.get("from", turn.get("role", ""))
+    return ""
+
+
 def get_answer_texts(row: dict) -> list[str]:
     return [
-        turn.get("value", "")
-        for turn in row.get("conversations", [])
-        if turn.get("from") in ("gpt", "assistant")
+        _tv(t) for t in row.get("conversations", [])
+        if _tr(t) in ("gpt", "assistant")
     ]
 
 
 def get_question_texts(row: dict) -> list[str]:
     return [
-        turn.get("value", "")
-        for turn in row.get("conversations", [])
-        if turn.get("from") == "human"
+        _tv(t) for t in row.get("conversations", [])
+        if _tr(t) == "human"
     ]
 
 
 def get_all_text(row: dict) -> str:
-    return "".join(turn.get("value", "") for turn in row.get("conversations", []))
+    return "".join(_tv(t) for t in row.get("conversations", []))
 
 
 def chinese_char_ratio(text: str) -> float:
@@ -125,7 +137,7 @@ def filter_role_errors(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     keep, removed = [], []
     for r in rows:
         conv = r.get("conversations", [])
-        if all(turn.get("from") in valid_roles for turn in conv):
+        if all(_tr(t) in valid_roles for t in conv):
             keep.append(r)
         else:
             removed.append(r)

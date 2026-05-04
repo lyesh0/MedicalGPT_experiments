@@ -43,22 +43,41 @@ def load_jsonl(filepath: str) -> list[dict]:
     return rows
 
 
-def extract_all_text(conv: list[dict]) -> str:
-    return "".join(turn.get("value", "") for turn in conv)
+def _turn_value(turn) -> str:
+    """Extract text from a turn, which may be a dict or a plain string."""
+    if isinstance(turn, dict):
+        return turn.get("value", turn.get("content", ""))
+    return str(turn)
 
 
-def extract_human_text(conv: list[dict]) -> str:
-    return "".join(turn.get("value", "") for turn in conv if turn.get("from") == "human")
+def _turn_role(turn) -> str:
+    if isinstance(turn, dict):
+        return turn.get("from", turn.get("role", ""))
+    return ""
 
 
-def extract_gpt_text(conv: list[dict]) -> str:
-    return "".join(turn.get("value", "") for turn in conv if turn.get("from") in ("gpt", "assistant"))
+def extract_all_text(conv) -> str:
+    if isinstance(conv, list):
+        return "".join(_turn_value(t) for t in conv)
+    return str(conv)
+
+
+def extract_human_text(conv) -> str:
+    if isinstance(conv, list):
+        return "".join(_turn_value(t) for t in conv if _turn_role(t) == "human")
+    return ""
+
+
+def extract_gpt_text(conv) -> str:
+    if isinstance(conv, list):
+        return "".join(_turn_value(t) for t in conv if _turn_role(t) in ("gpt", "assistant"))
+    return ""
 
 
 def has_empty_answer(row: dict) -> bool:
     for turn in row.get("conversations", []):
-        if turn.get("from") in ("gpt", "assistant"):
-            if len(turn.get("value", "").strip()) < 10:
+        if _turn_role(turn) in ("gpt", "assistant"):
+            if len(_turn_value(turn).strip()) < 10:
                 return True
     return False
 
@@ -66,7 +85,7 @@ def has_empty_answer(row: dict) -> bool:
 def is_role_valid(row: dict) -> bool:
     valid_roles = {"human", "gpt", "assistant", "system"}
     for turn in row.get("conversations", []):
-        if turn.get("from") not in valid_roles:
+        if _turn_role(turn) not in valid_roles:
             return False
     return True
 

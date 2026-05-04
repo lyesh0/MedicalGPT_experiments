@@ -104,8 +104,10 @@ def extract_questions(rows: list[dict]) -> list[str]:
     qs = []
     for r in rows:
         for turn in r.get("conversations", []):
-            if turn.get("from") == "human":
-                qs.append(turn.get("value", ""))
+            role = turn.get("from", "") if isinstance(turn, dict) else ""
+            val = turn.get("value", "") if isinstance(turn, dict) else str(turn)
+            if role == "human":
+                qs.append(val)
     return qs
 
 
@@ -148,9 +150,10 @@ def main():
     idx = 0
     for row in all_rows:
         for turn in row.get("conversations", []):
-            if turn.get("from") != "human":
+            role = turn.get("from", "") if isinstance(turn, dict) else ""
+            if role != "human":
                 continue
-            q = turn.get("value", "").strip()
+            q = (turn.get("value", "") if isinstance(turn, dict) else str(turn)).strip()
             if not q or len(q) < 10:
                 continue
             if q in train_qs or q in seen_qs:
