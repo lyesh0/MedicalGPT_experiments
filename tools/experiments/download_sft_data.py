@@ -129,7 +129,10 @@ def download_dataset(ds_name: str, config: dict, max_samples: int, use_mirror: b
     limit = min(max_samples, config["max_samples"]) if max_samples else config["max_samples"]
 
     try:
-        ds = load_dataset(ds_name, split="train", trust_remote_code=True)
+        try:
+            ds = load_dataset(ds_name, split="train", trust_remote_code=True)
+        except TypeError:
+            ds = load_dataset(ds_name, split="train")
         print(f"  Downloaded {len(ds)} total rows")
 
         rows = []
