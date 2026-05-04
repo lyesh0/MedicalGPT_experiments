@@ -138,3 +138,4 @@ outputs/
 *.bin
 *.safetensors
 !requirements.txt
+.DS_Store
