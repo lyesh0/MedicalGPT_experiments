@@ -7,64 +7,43 @@ Usage:
     python tools/experiments/download_sft_data.py --max_samples 3000
 
 Output:
-    data/experiments/sft/medical/  -- 3 medical datasets
-    data/experiments/sft/general/  -- 1 general dataset
+    data/experiments/sft/medical/  -- medical Q&A datasets
+    data/experiments/sft/general/  -- general conversation datasets
 """
 
 import os
 import json
 import argparse
-import sys
 
-# HF mirror for users in China
 HF_MIRROR = "https://hf-mirror.com"
 
 DATASETS = {
     "shibing624/medical": {
-        "max_samples": 3000,
+        "max_samples": 5000,
         "category": "medical",
-        "description": "MedicalGPT author's medical QA dataset",
-    },
-    "FreedomIntelligence/HuatuoGPT-sft-data-v1": {
-        "max_samples": 3000,
-        "category": "medical",
-        "description": "HuatuoGPT Chinese medical dialogue",
-    },
-    "wangrongsheng/Medical-Dialogue": {
-        "max_samples": 3000,
-        "category": "medical",
-        "description": "Doctor-patient multi-turn dialogues",
+        "description": "MedicalGPT author's medical QA dataset (finetune split)",
+        "subconfig": "finetune",
     },
     "shibing624/sharegpt_gpt4": {
         "max_samples": 5000,
         "category": "general",
         "description": "ShareGPT GPT-4 multi-turn conversations",
+        "subconfig": None,
     },
-}
-
-OAI_CONVERSATION_FORMAT = {
-    "shibing624/medical": "conversations",
-    "FreedomIntelligence/HuatuoGPT-sft-data-v1": "auto",
-    "wangrongsheng/Medical-Dialogue": "auto",
-    "shibing624/sharegpt_gpt4": "conversations",
 }
 
 
 def normalize_role(role: str) -> str:
-    """Unify role names to 'human' / 'gpt' / 'assistant' / 'system'."""
     role_lower = role.lower().strip()
     mapping = {
-        "user": "human",
-        "human": "human",
-        "assistant": "gpt",
-        "gpt": "gpt",
+        "user": "human", "human": "human",
+        "assistant": "gpt", "gpt": "gpt",
         "system": "system",
     }
     return mapping.get(role_lower, role_lower)
 
 
-def convert_row(row: dict, ds_name: str) -> dict | None:
-    """Convert a single row from any source dataset into OAI conversations format."""
+def convert_row(row: dict) -> dict | None:
     conversations = None
 
     if "conversations" in row:
@@ -75,10 +54,8 @@ def convert_row(row: dict, ds_name: str) -> dict | None:
 
     if conversations is None:
         for qk, ak in [
-            ("question", "answer"),
-            ("input", "output"),
-            ("instruction", "output"),
-            ("prompt", "response"),
+            ("question", "answer"), ("input", "output"),
+            ("instruction", "output"), ("prompt", "response"),
             ("query", "response"),
         ]:
             if qk in row and ak in row:
@@ -87,12 +64,6 @@ def convert_row(row: dict, ds_name: str) -> dict | None:
                     {"from": "gpt", "value": str(row[ak])},
                 ]
                 break
-
-    if conversations is None and "text" in row:
-        conversations = [
-            {"from": "human", "value": str(row["text"])},
-            {"from": "gpt", "value": ""},
-        ]
 
     if conversations is None:
         return None
@@ -103,7 +74,7 @@ def convert_row(row: dict, ds_name: str) -> dict | None:
             continue
         role = normalize_role(turn.get("from", turn.get("role", "")))
         value = turn.get("value", turn.get("content", ""))
-        if not role or not value:
+        if not role or not str(value).strip():
             continue
         normalized.append({"from": role, "value": str(value)})
 
@@ -111,7 +82,6 @@ def convert_row(row: dict, ds_name: str) -> dict | None:
 
 
 def download_dataset(ds_name: str, config: dict, max_samples: int, use_mirror: bool) -> list[dict]:
-    """Download a dataset from HuggingFace and convert to unified format."""
     print(f"\n{'='*60}")
     print(f"Downloading: {ds_name}")
     print(f"  {config['description']}")
@@ -129,10 +99,17 @@ def download_dataset(ds_name: str, config: dict, max_samples: int, use_mirror: b
     limit = min(max_samples, config["max_samples"]) if max_samples else config["max_samples"]
 
     try:
+        # Use subconfig if specified, with datasets 2.x / 3.x compatibility
+        kwargs = {"path": ds_name, "split": "train"}
+        if config.get("subconfig"):
+            kwargs["name"] = config["subconfig"]
         try:
-            ds = load_dataset(ds_name, split="train", trust_remote_code=True)
+            kwargs["trust_remote_code"] = True
+            ds = load_dataset(**kwargs)
         except TypeError:
-            ds = load_dataset(ds_name, split="train")
+            del kwargs["trust_remote_code"]
+            ds = load_dataset(**kwargs)
+
         print(f"  Downloaded {len(ds)} total rows")
 
         rows = []
@@ -140,7 +117,7 @@ def download_dataset(ds_name: str, config: dict, max_samples: int, use_mirror: b
         for i, row in enumerate(ds):
             if len(rows) >= limit:
                 break
-            conv = convert_row(row, ds_name)
+            conv = convert_row(row)
             if conv and len(conv["conversations"]) >= 2:
                 rows.append(conv)
             else:
@@ -164,18 +141,22 @@ def save_jsonl(rows: list[dict], filepath: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Download SFT datasets for MedicalGPT experiments")
-    parser.add_argument("--max_samples", type=int, default=0, help="Max samples per dataset (0=use built-in limit)")
-    parser.add_argument("--use_mirror", action="store_true", help="Use hf-mirror.com for China access")
-    parser.add_argument("--output_dir", type=str, default="data/experiments/sft", help="Output root directory")
-    parser.add_argument("--skip_existing", action="store_true", help="Skip download if output file exists")
+    parser.add_argument("--max_samples", type=int, default=0,
+                        help="Max samples per dataset (0=use built-in limit)")
+    parser.add_argument("--use_mirror", action="store_true",
+                        help="Use hf-mirror.com for China access")
+    parser.add_argument("--output_dir", type=str, default="data/experiments/sft",
+                        help="Output root directory")
+    parser.add_argument("--skip_existing", action="store_true",
+                        help="Skip download if output file exists")
     args = parser.parse_args()
 
     base = args.output_dir
-
     all_counts = {}
-    for ds_name, config in DATASETS.items():
+
+    for ds_name, cfg in DATASETS.items():
         out_file = f"{ds_name.replace('/', '_')}.jsonl"
-        out_path = os.path.join(base, config["category"], out_file)
+        out_path = os.path.join(base, cfg["category"], out_file)
 
         if args.skip_existing and os.path.exists(out_path):
             with open(out_path, encoding="utf-8") as f:
@@ -184,8 +165,7 @@ def main():
             all_counts[ds_name] = count
             continue
 
-        rows = download_dataset(ds_name, config, args.max_samples or 0, args.use_mirror)
-
+        rows = download_dataset(ds_name, cfg, args.max_samples or 0, args.use_mirror)
         if not rows:
             print(f"  [WARNING] No data downloaded for {ds_name}")
             continue
