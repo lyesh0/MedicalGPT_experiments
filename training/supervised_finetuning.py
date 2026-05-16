@@ -1,21 +1,44 @@
 # -*- coding: utf-8 -*-
 # Copyright 2023 XuMing(xuming624@qq.com) and The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Fine-tuning the library models for causal language modeling (GPT, LLaMA, Bloom, ...) on a json file or a dataset.
 
-part of code is modified from https://github.com/shibing624/textgen
+"""
+SFT (Supervised Fine-Tuning) 监督微调 —— 整个项目的核心训练脚本。
+
+============================================================================
+训练流程总览：
+============================================================================
+
+  原始数据 (jsonl)                  训练好的模型
+      │                                ▲
+      ▼                                │
+  ┌──────────────┐    ┌───────────┐    │
+  │ 1.加载数据集  │ → │ 2.预处理   │    │
+  │   (jsonl)    │   │ (tokenize) │    │
+  └──────────────┘    └─────┬─────┘    │
+                            │          │
+                     ┌──────▼──────┐    │
+                     │ 3.加载模型   │    │
+                     │ (Qwen3.5-2B)│    │
+                     └──────┬──────┘    │
+                            │          │
+                     ┌──────▼──────┐    │
+                     │ 4.LoRA 配置 │    │
+                     │ (低秩适配)   │    │
+                     └──────┬──────┘    │
+                            │          │
+                     ┌──────▼──────┐    │
+                     │ 5.Trainer   │ ──┘
+                     │   训练循环   │
+                     └─────────────┘
+
+============================================================================
+关键技术点：
+  - LoRA: 只训练少量低秩矩阵，冻结原模型权重，大幅降低显存
+  - DataCollatorForSeq2Seq: 动态填充到批次内最长序列，负位置填充
+  - IGNORE_INDEX: labels 中 query 部分标记为 -100，loss 计算时跳过
+  - FlashAttention-2: 加速注意力计算，显存效率更高
+  - QLoRA: 4bit 量化 + LoRA，极限降低显存
+============================================================================
 """
 
 import math
@@ -59,77 +82,50 @@ except ImportError:
 
 
 
+# ============================================================================
+# 参数配置（三大 dataclass）：使用 HfArgumentParser 从命令行解析
+#   ModelArguments  — 模型相关（路径、量化、精度）
+#   DataArguments   — 数据相关（jsonl 路径、采样数）
+#   ScriptArguments — 训练策略（LoRA 参数、模板名、上下文长度）
+#   Seq2SeqTrainingArguments — HuggingFace 内置，训练超参（lr、epochs、batch_size等）
+# ============================================================================
+
 @dataclass
 class ModelArguments:
     """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune, or train from scratch.
+    模型加载相关参数。
+    关键字段：
+      model_name_or_path: 预训练模型路径，本项目用 /root/autodl-tmp/models/Qwen3.5-2B
+      load_in_4bit/8bit: 量化加载，4bit≈省75%显存
+      torch_dtype: 模型权重的数据类型，默认 float16
+      flash_attn: 开启 FlashAttention-2 加速（RTX 4090 支持）
+      rope_scaling: 扩展上下文长度的 RoPE 缩放策略
     """
 
     model_name_or_path: Optional[str] = field(
         default=None,
-        metadata={
-            "help": (
-                "The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
-            )
-        },
+        metadata={"help": "预训练模型路径，如 /root/autodl-tmp/models/Qwen3.5-2B"},
     )
-    load_in_8bit: bool = field(default=False, metadata={"help": "Whether to load the model in 8bit mode or not."})
-    load_in_4bit: bool = field(default=False, metadata={"help": "Whether to load the model in 4bit mode or not."})
+    load_in_8bit: bool = field(default=False, metadata={"help": "8bit 量化加载模型"})
+    load_in_4bit: bool = field(default=False, metadata={"help": "4bit 量化加载模型"})
     tokenizer_name_or_path: Optional[str] = field(
         default=None,
-        metadata={
-            "help": (
-                "The tokenizer for weights initialization.Don't set if you want to train a model from scratch."
-            )
-        },
+        metadata={"help": "分词器路径，默认与 model_name_or_path 相同"},
     )
-    cache_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
-    )
-    model_revision: Optional[str] = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    hf_hub_token: Optional[str] = field(default=None, metadata={"help": "Auth token to log in with Hugging Face Hub."})
-    use_fast_tokenizer: bool = field(
-        default=False,
-        metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
-    )
+    cache_dir: Optional[str] = field(default=None, metadata={"help": "模型缓存目录"})
+    model_revision: Optional[str] = field(default="main", metadata={"help": "模型版本"})
+    hf_hub_token: Optional[str] = field(default=None, metadata={"help": "HuggingFace Hub 认证 token"})
+    use_fast_tokenizer: bool = field(default=False, metadata={"help": "是否使用 fast tokenizer"})
     torch_dtype: Optional[str] = field(
         default="float16",
-        metadata={
-            "help": (
-                "Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed, the "
-                "dtype will be automatically derived from the model's weights."
-            ),
-            "choices": ["auto", "bfloat16", "float16", "float32"],
-        },
+        metadata={"help": "模型数据类型: auto/bfloat16/float16/float32", "choices": ["auto", "bfloat16", "float16", "float32"]},
     )
-    device_map: Optional[str] = field(
-        default="auto",
-        metadata={"help": "Device to map model to. If `auto` is passed, the device will be selected automatically. "},
-    )
-    trust_remote_code: bool = field(
-        default=True,
-        metadata={"help": "Whether to trust remote code when loading a model from a remote checkpoint."},
-    )
-    rope_scaling: Optional[Literal["linear", "dynamic"]] = field(
-        default=None,
-        metadata={"help": "Adopt scaled rotary positional embeddings."}
-    )
-    flash_attn: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Enable FlashAttention-2 for faster training."}
-    )
-    shift_attn: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Enable shifted sparse attention (S^2-Attn) proposed by LongLoRA."}
-    )
-    neft_alpha: Optional[float] = field(
-        default=0,
-        metadata={"help": "The alpha parameter to control the noise magnitude in NEFTune. value can be 5."}
-    )
+    device_map: Optional[str] = field(default="auto", metadata={"help": "设备映射策略，auto 自动分配到多 GPU"})
+    trust_remote_code: bool = field(default=True, metadata={"help": "信任远程仓库中的自定义代码"})
+    rope_scaling: Optional[Literal["linear", "dynamic"]] = field(default=None, metadata={"help": "RoPE 位置编码缩放"})
+    flash_attn: Optional[bool] = field(default=False, metadata={"help": "启用 FlashAttention-2"})
+    shift_attn: Optional[bool] = field(default=False, metadata={"help": "启用 LongLoRA 的稀疏注意力"})
+    neft_alpha: Optional[float] = field(default=0, metadata={"help": "NEFTune 噪声正则化强度，如 5"})
 
     def __post_init__(self):
         if self.model_name_or_path is None:
@@ -139,52 +135,22 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     """
-    Arguments pertaining to what data we are going to input our model for training and eval.
+    数据加载相关参数。
+    支持两种数据来源：
+      1. HuggingFace Datasets Hub（dataset_name）
+      2. 本地 jsonl 文件（train_file_dir / validation_file_dir）← 本项目用这个
     """
 
-    dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
-    )
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
-    train_file_dir: Optional[str] = field(default=None, metadata={"help": "The train jsonl data file folder."})
-    validation_file_dir: Optional[str] = field(default=None, metadata={"help": "The evaluation jsonl file folder."})
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_eval_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
-        },
-    )
-    ignore_pad_token_for_loss: bool = field(
-        default=True,
-        metadata={"help": "If only pad tokens should be ignored. This assumes that `config.pad_token_id` is defined."},
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
-    )
-    validation_split_percentage: Optional[int] = field(
-        default=1,
-        metadata={
-            "help": "The percentage of the train set used as validation set in case there's no validation split"
-        },
-    )
-    preprocessing_num_workers: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of processes to use for the preprocessing."},
-    )
+    dataset_name: Optional[str] = field(default=None, metadata={"help": "HuggingFace 数据集名称"})
+    dataset_config_name: Optional[str] = field(default=None, metadata={"help": "数据集配置名"})
+    train_file_dir: Optional[str] = field(default=None, metadata={"help": "训练数据 jsonl 文件夹路径"})
+    validation_file_dir: Optional[str] = field(default=None, metadata={"help": "验证数据 jsonl 文件夹路径"})
+    max_train_samples: Optional[int] = field(default=None, metadata={"help": "最多用多少训练样本"})
+    max_eval_samples: Optional[int] = field(default=None, metadata={"help": "最多用多少验证样本"})
+    ignore_pad_token_for_loss: bool = field(default=True, metadata={"help": "loss 计算时忽略 pad token"})
+    overwrite_cache: bool = field(default=False, metadata={"help": "是否覆盖缓存的 tokenized 数据"})
+    validation_split_percentage: Optional[int] = field(default=1, metadata={"help": "从训练集切出多少%做验证集"})
+    preprocessing_num_workers: Optional[int] = field(default=None, metadata={"help": "预处理并行进程数"})
 
     def __post_init__(self):
         if self.max_train_samples is not None and 0 < self.max_train_samples <= 1000:
@@ -193,27 +159,30 @@ class DataArguments:
 
 @dataclass
 class ScriptArguments:
-    use_peft: bool = field(default=True, metadata={"help": "Whether to use peft"})
-    train_on_inputs: bool = field(default=False, metadata={"help": "Whether to train on inputs"})
-    target_modules: Optional[str] = field(default="all")
-    lora_rank: Optional[int] = field(default=8)
-    lora_dropout: Optional[float] = field(default=0.05)
-    lora_alpha: Optional[float] = field(default=32.0)
-    modules_to_save: Optional[str] = field(default=None)
-    peft_path: Optional[str] = field(default=None, metadata={"help": "The path to the peft model"})
-    qlora: bool = field(default=False, metadata={"help": "Whether to use qlora"})
-    model_max_length: int = field(
-        default=512,
-        metadata={"help": "Maximum model context length. suggest: 8192 * 4, 8192 * 2, 8192, 4096, 2048, 1024, 512"}
-    )
-    template_name: Optional[str] = field(
-        default=None,
-        metadata={"help": "The prompt template name. If not set, use tokenizer's built-in chat_template."}
-    )
-    tool_format: Optional[str] = field(
-        default=None,
-        metadata={"help": "Tool format to use for agent training. Options: default, glm4, llama3, mistral, qwen."}
-    )
+    """
+    训练策略相关参数。
+    关键字段：
+      use_peft: 是否用 LoRA（本项目默认开启）
+      lora_rank: LoRA 秩 r，决定低秩矩阵的大小。r 越大 → 可训参数越多 → 表达能力更强
+      lora_alpha: LoRA 缩放因子，实际学习率 = lr * (alpha / r)
+      target_modules: 对哪些层加 LoRA，"all" = 所有线性层
+      template_name: 对话模板名，如 "qwen3_5"，对应 template.py 中的注册名
+      train_on_inputs: 是否连用户输入一起算 loss（默认 False，只算回复部分）
+      model_max_length: 最大上下文长度，超过的序列会截断
+    """
+
+    use_peft: bool = field(default=True, metadata={"help": "是否使用 LoRA 参数高效微调"})
+    train_on_inputs: bool = field(default=False, metadata={"help": "是否在用户输入上也计算 loss（通常关闭）"})
+    target_modules: Optional[str] = field(default="all", metadata={"help": "LoRA 目标模块，all=所有线性层"})
+    lora_rank: Optional[int] = field(default=8, metadata={"help": "LoRA 秩 r"})
+    lora_dropout: Optional[float] = field(default=0.05, metadata={"help": "LoRA dropout 率"})
+    lora_alpha: Optional[float] = field(default=32.0, metadata={"help": "LoRA 缩放因子"})
+    modules_to_save: Optional[str] = field(default=None, metadata={"help": "额外需要完整保存的模块"})
+    peft_path: Optional[str] = field(default=None, metadata={"help": "已有 LoRA 权重路径（用于继续训练）"})
+    qlora: bool = field(default=False, metadata={"help": "是否使用 QLoRA（4bit 量化 + LoRA）"})
+    model_max_length: int = field(default=512, metadata={"help": "最大上下文长度"})
+    template_name: Optional[str] = field(default=None, metadata={"help": "对话模板名，如 qwen3_5"})
+    tool_format: Optional[str] = field(default=None, metadata={"help": "工具调用格式（Agent 训练用）"})
 
     def __post_init__(self):
         if self.model_max_length < 60:
@@ -222,11 +191,13 @@ class ScriptArguments:
 
 class SavePeftModelTrainer(Trainer):
     """
-    Trainer for lora models
+    继承 HuggingFace Trainer，覆盖 save_model 方法，
+    使其正确保存 LoRA adapter 权重而非完整模型。
+    LoRA 只保存 adapter_config.json + adapter_model.safetensors
     """
 
     def save_model(self, output_dir=None, _internal_call=False):
-        """Save the LoRA model."""
+        """保存 LoRA adapter 权重"""
         os.makedirs(output_dir, exist_ok=True)
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
         self.model.save_pretrained(output_dir)
@@ -329,6 +300,10 @@ def check_and_optimize_memory():
 
 
 def main():
+    """
+    SFT 训练主函数。
+    执行顺序：解析参数 → 加载 tokenizer → 加载数据 → 预处理 → 加载模型 → LoRA → Trainer → 训练 → 评估
+    """
     parser = HfArgumentParser((ModelArguments, DataArguments, Seq2SeqTrainingArguments, ScriptArguments))
 
     # 使用 parse_args_into_dataclasses 时忽略未知参数
@@ -361,6 +336,9 @@ def main():
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
+    # ========================================================================
+    # 加载 Tokenizer，确保有 eos_token, bos_token, pad_token
+    # ========================================================================
     # Load tokenizer
     tokenizer_kwargs = {
         "cache_dir": model_args.cache_dir,
@@ -414,7 +392,7 @@ def main():
             raw_datasets["train"] = split["train"]
             raw_datasets["validation"] = split["test"]
     else:
-        # Loading a dataset from local files.
+        # 从本地 jsonl 文件加载数据（本项目使用此方式）
         data_files = {}
         if data_args.train_file_dir is not None and os.path.exists(data_args.train_file_dir):
             train_data_files = glob(f'{data_args.train_file_dir}/**/*.jsonl', recursive=True)
@@ -443,11 +421,20 @@ def main():
     # Preprocessing the datasets
     max_length = script_args.model_max_length
 
+    # ========================================================================
+    # 核心函数：preprocess_function
+    # 将原始 jsonl 数据（对话格式）转换为模型可用的 input_ids 和 labels
+    #
+    # 数据流:
+    #   jsonl 一行:
+    #     {"conversations": [{"from":"human","value":"..."}, {"from":"gpt","value":"..."}]}
+    #       ↓ get_dialog()  →  ["<|im_start|>user\n...<|im_end|>\n...", "回复"]
+    #       ↓ tokenize     →  input_ids = [1, 2, 3, ...]
+    #       ↓ label masking →  labels = [-100, -100, ..., 4, 5, 6]  (query 部分标记为 -100)
+    #
+    # labels 中 -100 是 IGNORE_INDEX，loss 计算时会跳过，这样模型只学习生成回复部分
+    # ========================================================================
     def preprocess_function(examples):
-        """
-        Preprocessing the datasets.
-            part of code modified from https://github.com/lm-sys/FastChat
-        """
         input_ids_list = []
         attention_mask_list = []
         targets_list = []
@@ -521,6 +508,8 @@ def main():
 
                 if not system_prompt:
                     system_prompt = system_prompts[i] if system_prompts else ""
+                # 如果有指定模板名（如 qwen3_5），用模板的 get_dialog 格式化
+                # 否则用 tokenizer 内置的 chat_template
                 if prompt_template:
                     yield prompt_template.get_dialog(history_messages, system_prompt=system_prompt)
                 else:
@@ -534,8 +523,8 @@ def main():
                         cur_text = tokenizer.apply_chat_template(
                             accumulated, tokenize=False, add_generation_prompt=True
                         )
-                        convs.append(cur_text[len(prev_text):])
-                        convs.append(br)
+                        convs.append(cur_text[len(prev_text):])  # 截出本轮新增的 query 部分
+                        convs.append(br)                          # response 原样保留
                         accumulated.append({"role": "assistant", "content": br})
                         prev_text = tokenizer.apply_chat_template(
                             accumulated, tokenize=False, add_generation_prompt=False
@@ -546,28 +535,35 @@ def main():
             input_ids, labels = [], []
 
             for i in range(len(dialog) // 2):
+                # source_ids = tokenize 后的 query（用户输入 + 模板格式）
+                # target_ids = tokenize 后的 response（助手回复）
                 source_ids = tokenizer.encode(text=dialog[2 * i], add_special_tokens=(i == 0))
                 target_ids = tokenizer.encode(text=dialog[2 * i + 1], add_special_tokens=False)
 
+                # 按长度比例分配截断额度，防止长 query 吃掉全部 context
                 total_len = len(source_ids) + len(target_ids)
                 max_source_len = int(max_length * (len(source_ids) / total_len))
                 max_target_len = int(max_length * (len(target_ids) / total_len))
 
                 if len(source_ids) > max_source_len:
                     source_ids = source_ids[:max_source_len]
-                if len(target_ids) > max_target_len - 1:  # eos token
+                if len(target_ids) > max_target_len - 1:  # 给 eos token 留位置
                     target_ids = target_ids[:max_target_len - 1]
                 if len(source_ids) > 0 and source_ids[0] == tokenizer.eos_token_id:
                     source_ids = source_ids[1:]
                 if len(target_ids) > 0 and target_ids[-1] == tokenizer.eos_token_id:
                     target_ids = target_ids[:-1]
                 if len(input_ids) + len(source_ids) + len(target_ids) + 1 > max_length:
-                    break
+                    break  # 超出 context 长度，丢弃后续轮次
 
-                input_ids += source_ids + target_ids + [tokenizer.eos_token_id]  # add eos token for each turn
+                # 拼接：source + target + eos
+                input_ids += source_ids + target_ids + [tokenizer.eos_token_id]
                 if script_args.train_on_inputs:
+                    # 所有 token 都参与 loss 计算（罕见）
                     labels += source_ids + target_ids + [tokenizer.eos_token_id]
                 else:
+                    # 关键：query 部分的 labels 设为 IGNORE_INDEX(-100)
+                    # 这样 loss 只在 target(reply) + eos 上计算
                     labels += [IGNORE_INDEX] * len(source_ids) + target_ids + [tokenizer.eos_token_id]
 
             input_ids_list.append(input_ids)
@@ -650,7 +646,11 @@ def main():
             logger.debug("Tokenized eval example:")
             logger.debug(tokenizer.decode(eval_dataset[0]['input_ids']))
 
-    # Load model
+    # ========================================================================
+    # 加载模型
+    # 流程：AutoConfig → 量化配置 → AutoModelForCausalLM.from_pretrained
+    # 之后：LoRA 配置 → get_peft_model（冻结原权重，添加可训练低秩矩阵）
+    # ========================================================================
     if model_args.model_name_or_path:
         torch_dtype = (
             model_args.torch_dtype
@@ -876,7 +876,7 @@ def main():
     if script_args.use_peft:
         logger.info("Fine-tuning method: LoRA(PEFT)")
 
-        # Set fp32 forward hook for lm_head
+        # lm_head（输出层）用 fp32 精度，避免数值不稳定
         output_layer = getattr(model, "lm_head")
         if isinstance(output_layer, torch.nn.Linear) and output_layer.weight.dtype != torch.float32:
             def fp32_forward_post_hook(module: torch.nn.Module, args: Tuple[torch.Tensor], output: torch.Tensor):
@@ -884,31 +884,38 @@ def main():
 
             output_layer.register_forward_hook(fp32_forward_post_hook)
 
-        # Load LoRA model
+        # 如果提供了已有 LoRA 路径（peft_path），从该路径加载继续训练
+        # 否则创建全新的 LoRA 配置
         if script_args.peft_path is not None:
             logger.info(f"Peft from pre-trained model: {script_args.peft_path}")
             model = PeftModel.from_pretrained(model, script_args.peft_path, is_trainable=True)
         else:
             logger.info("Init new peft model")
             if load_in_8bit or load_in_4bit:
+                # 量化模型需要特殊预处理，使其兼容 LoRA 训练
                 model = prepare_model_for_kbit_training(model, training_args.gradient_checkpointing)
             target_modules = script_args.target_modules.split(',') if script_args.target_modules else None
             if target_modules and 'all' in target_modules:
+                # "all" = 自动找到模型中的所有线性层作为 LoRA 目标
                 target_modules = find_all_linear_names(model, int4=load_in_4bit, int8=load_in_8bit)
             modules_to_save = script_args.modules_to_save
             if modules_to_save is not None:
                 modules_to_save = modules_to_save.split(',')
             logger.info(f"Peft target_modules: {target_modules}")
             logger.info(f"Peft lora_rank: {script_args.lora_rank}")
+            # LoRA 配置：
+            #   r=8:     低秩矩阵秩（越大可训参数越多）
+            #   alpha=32: 缩放因子，实际学习率 ≈ lr * alpha / r
+            #   dropout=0.05: LoRA 层的 dropout
             peft_config = LoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                target_modules=target_modules,
-                inference_mode=False,
-                r=script_args.lora_rank,
-                lora_alpha=script_args.lora_alpha,
+                task_type=TaskType.CAUSAL_LM,      # 因果语言模型任务
+                target_modules=target_modules,      # 哪些层添加 LoRA
+                inference_mode=False,               # 训练模式
+                r=script_args.lora_rank,           # LoRA 秩
+                lora_alpha=script_args.lora_alpha, # 缩放因子
                 lora_dropout=script_args.lora_dropout,
                 modules_to_save=modules_to_save)
-            model = get_peft_model(model, peft_config)
+            model = get_peft_model(model, peft_config)  # 包装模型：冻结原权重 + 插入 LoRA 层
         for param in filter(lambda p: p.requires_grad, model.parameters()):
             param.data = param.data.to(torch.float32)
         model.print_trainable_parameters()
@@ -917,27 +924,31 @@ def main():
         model = model.float()
         print_trainable_parameters(model)
 
-    # Initialize our Trainer
+    # ========================================================================
+    # 初始化 Trainer
+    # ========================================================================
+    # Gradient Checkpointing: 用时间换空间，不存所有中间激活，反向时重算
     if training_args.gradient_checkpointing and getattr(model, "supports_gradient_checkpointing", False):
         model.gradient_checkpointing_enable()
-        model.config.use_cache = False
+        model.config.use_cache = False  # gradient checkpointing 时不能用 KV cache
         logger.info("Gradient checkpointing enabled.")
     else:
         model.config.use_cache = True
         logger.info("Gradient checkpointing disabled.")
     model.enable_input_require_grads()
     if not ddp and torch.cuda.device_count() > 1:
-        # Keeps Trainer from trying its own DataParallelism when more than 1 gpu is available
+        # 多 GPU 但不使用 DDP 时，启用模型并行
         model.is_parallelizable = True
         model.model_parallel = True
 
+    # DataCollatorForSeq2Seq: 自动将 batch 内序列填充到相同长度
+    # label_pad_token_id = IGNORE_INDEX(-100): 填充位置的 label 也是 -100，不参与 loss
     data_collator = DataCollatorForSeq2Seq(
         tokenizer=tokenizer,
         model=model,
         label_pad_token_id=IGNORE_INDEX,
-        pad_to_multiple_of=4 if tokenizer.padding_side == "right" else None,  # for shifted sparse attention
+        pad_to_multiple_of=4 if tokenizer.padding_side == "right" else None,
     )
-    # Initialize our Trainer
     trainer = SavePeftModelTrainer(
         model=model,
         args=training_args,
@@ -947,7 +958,9 @@ def main():
         data_collator=data_collator,
     )
 
-    # Training
+    # ========================================================================
+    # 开始训练
+    # ========================================================================
     if training_args.do_train:
         if trainer.is_world_process_zero():
             logger.info("*** Train ***")
@@ -977,11 +990,14 @@ def main():
             logger.debug(f"Training metrics: {metrics}")
             logger.info(f"Saving model checkpoint to {training_args.output_dir}")
             if is_deepspeed_zero3_enabled():
+                # DeepSpeed ZeRO-3 需要特殊保存方式：先合并分散的权重再保存
                 save_model_zero3(model, tokenizer, training_args, trainer)
             else:
                 save_model(model, tokenizer, training_args)
 
-    # Evaluation
+    # ========================================================================
+    # 验证评估
+    # ========================================================================
     if training_args.do_eval:
         if trainer.is_world_process_zero():
             logger.info("*** Evaluate ***")

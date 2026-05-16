@@ -121,6 +121,8 @@ def main():
     logger.debug(f"Tokenizer: {tokenizer}")
 
     # Load reward model as reward function
+    # The RM is saved as a PEFT adapter (not a full model), so we load:
+    #   base model -> PEFT adapter -> score head
     reward_model_kwargs = dict(
         trust_remote_code=model_args.trust_remote_code,
         num_labels=1,
@@ -133,9 +135,41 @@ def main():
         reward_model_kwargs["max_memory"] = max_memory
     if is_main_process:
         logger.info(f"Loading reward model from: {args.reward_model_path}")
-    reward_model = AutoModelForSequenceClassification.from_pretrained(
-        args.reward_model_path, **reward_model_kwargs
-    )
+    from peft import PeftModel
+    # Load base model first
+    adapter_config_path = os.path.join(args.reward_model_path, "adapter_config.json")
+    if os.path.exists(adapter_config_path):
+        import json
+        with open(adapter_config_path) as f:
+            adapter_cfg = json.load(f)
+        base_model_path = adapter_cfg.get("base_model_name_or_path", args.reward_model_path)
+        reward_model = AutoModelForSequenceClassification.from_pretrained(
+            base_model_path, **reward_model_kwargs
+        )
+        if not hasattr(reward_model, "prepare_inputs_for_generation"):
+            import types
+            def _prepare_inputs_for_generation(self, *args, **kwargs):
+                raise NotImplementedError
+            reward_model.prepare_inputs_for_generation = types.MethodType(_prepare_inputs_for_generation, reward_model)
+        reward_model = PeftModel.from_pretrained(reward_model, args.reward_model_path)
+        # Load score head
+        score_head_path = os.path.join(args.reward_model_path, "score_head.pt")
+        if os.path.exists(score_head_path):
+            base_model = reward_model.base_model.model
+            if hasattr(base_model, "score"):
+                base_model.score.load_state_dict(torch.load(score_head_path, map_location="cpu"))
+                logger.info(f"Loaded RM score head from {score_head_path}")
+        # Ensure pad_token_id is set on the base model config
+        # (PeftModel.config doesn't propagate to base model config)
+        if hasattr(reward_model, "base_model"):
+            base_model = reward_model.base_model.model
+            if hasattr(base_model, "config"):
+                base_model.config.pad_token_id = tokenizer.pad_token_id
+        reward_model.eval()
+    else:
+        reward_model = AutoModelForSequenceClassification.from_pretrained(
+            args.reward_model_path, **reward_model_kwargs
+        )
     if is_main_process and hasattr(reward_model, 'hf_device_map'):
         logger.info(f"Reward model device map: {dict(reward_model.hf_device_map)}")
 
@@ -257,7 +291,7 @@ def main():
         tokenized_train_dataset = train_dataset.map(
             preprocess_function,
             batched=True,
-            num_proc=training_args.dataset_num_proc,
+            num_proc=getattr(training_args, 'dataset_num_proc', None) or getattr(training_args, 'dataloader_num_workers', None) or 4,
             remove_columns=train_dataset.column_names,
             load_from_cache_file=False,
             desc="Running tokenizer on dataset" if is_main_process else None,
@@ -272,7 +306,7 @@ def main():
         tokenized_eval_dataset = eval_dataset.map(
             preprocess_function,
             batched=True,
-            num_proc=training_args.dataset_num_proc,
+            num_proc=getattr(training_args, 'dataset_num_proc', None) or getattr(training_args, 'dataloader_num_workers', None) or 4,
             remove_columns=eval_dataset.column_names,
             load_from_cache_file=False,
             desc="Running tokenizer on dataset" if is_main_process else None,
@@ -287,6 +321,7 @@ def main():
     trainer = RLOOTrainer(
         args=training_args,
         processing_class=tokenizer,
+        reward_processing_classes=tokenizer,
         model=policy,
         reward_funcs=reward_model,
         train_dataset=train_dataset,

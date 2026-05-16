@@ -11,7 +11,7 @@
 set -euo pipefail
 
 # ── Fixed hyperparameters (same for all groups) ──
-BASE_MODEL="Qwen/Qwen3.5-2B"
+BASE_MODEL="/root/autodl-tmp/models/Qwen3.5-2B"
 LORA_RANK=8
 LORA_ALPHA=16
 LORA_DROPOUT=0.05
@@ -81,6 +81,12 @@ for group in $TRAIN_GROUPS; do
     echo "  Output: $OUTPUT_DIR"
     echo "────────────────────────────────────────────"
 
+    # Check if flash_attn is available
+    FLASH_ATTN_FLAG=""
+    if python -c "import flash_attn" 2>/dev/null; then
+        FLASH_ATTN_FLAG="--flash_attn True"
+    fi
+
     CMD="python training/supervised_finetuning.py \
         --model_name_or_path $BASE_MODEL \
         --train_file_dir $DATA_DIR \
@@ -118,7 +124,7 @@ for group in $TRAIN_GROUPS; do
         --max_eval_samples $MAX_EVAL_SAMPLES \
         --preprocessing_num_workers 4 \
         --cache_dir ./cache \
-        --flash_attn True"
+        $FLASH_ATTN_FLAG"
 
     if $DRY_RUN; then
         echo "[DRY RUN] Command:"

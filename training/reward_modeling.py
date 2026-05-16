@@ -291,6 +291,14 @@ def save_model(model, tokenizer, args):
     model_to_save.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
+    # Save score head separately (PEFT save_pretrained only saves LoRA weights,
+    # but the score head is part of the base model and must be persisted).
+    base_model = model_to_save.base_model.model
+    if hasattr(base_model, "score"):
+        score_path = os.path.join(output_dir, "score_head.pt")
+        torch.save(base_model.score.state_dict(), score_path)
+        logger.info(f"Score head saved to {score_path}")
+
 
 class CastOutputToFloat(torch.nn.Sequential):
     """Cast the output of the model to float"""
@@ -366,18 +374,23 @@ def main():
         config = AutoConfig.from_pretrained(
             model_args.model_name_or_path,
             num_labels=1,
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
             trust_remote_code=model_args.trust_remote_code,
             cache_dir=model_args.cache_dir
         )
+        model_kwargs = {
+            "config": config,
+            "dtype": torch_dtype,
+            "device_map": model_args.device_map,
+            "trust_remote_code": model_args.trust_remote_code,
+        }
+        if model_args.load_in_4bit:
+            model_kwargs["load_in_4bit"] = True
+        if model_args.load_in_8bit:
+            model_kwargs["load_in_8bit"] = True
         model = AutoModelForSequenceClassification.from_pretrained(
             model_args.model_name_or_path,
-            config=config,
-            torch_dtype=torch_dtype,
-            load_in_4bit=model_args.load_in_4bit,
-            load_in_8bit=model_args.load_in_8bit,
-            device_map=model_args.device_map,
-            trust_remote_code=model_args.trust_remote_code,
+            **model_kwargs,
         )
     else:
         raise ValueError(f"Error, model_name_or_path is None, RM must be loaded from a pre-trained model")
@@ -418,7 +431,19 @@ def main():
         logger.info("Fine-tuning method: LoRA(PEFT)")
         if script_args.peft_path is not None:
             logger.info(f"Peft from pre-trained model: {script_args.peft_path}")
+            # PEFT >= 0.19 requires prepare_inputs_for_generation on the base model,
+            # but SequenceClassification models don't have it. Add a stub if missing.
+            if not hasattr(model, "prepare_inputs_for_generation"):
+                def _prepare_inputs_for_generation(self, *args, **kwargs):
+                    raise NotImplementedError("prepare_inputs_for_generation is not supported for this model")
+                import types
+                model.prepare_inputs_for_generation = types.MethodType(_prepare_inputs_for_generation, model)
             model = PeftModel.from_pretrained(model, script_args.peft_path, is_trainable=True)
+            # Unfreeze the score head (base model params are frozen by PEFT)
+            base_model = model.base_model.model
+            if hasattr(base_model, "score"):
+                base_model.score.requires_grad_(True)
+                logger.info("Unfroze score head for training")
         else:
             logger.info("Init new peft model")
             if model_args.load_in_8bit:

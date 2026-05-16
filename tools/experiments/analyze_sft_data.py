@@ -91,14 +91,28 @@ def is_role_valid(row: dict) -> bool:
 
 
 def find_duplicates(rows: list[dict], threshold: float = 0.9) -> list[tuple[int, int]]:
-    """Find near-duplicate pairs based on the first human utterance."""
-    pairs = []
-    texts = [extract_human_text(r) for r in rows]
-    for i in range(len(texts)):
-        for j in range(i + 1, len(texts)):
-            if SequenceMatcher(None, texts[i], texts[j]).ratio() > threshold:
-                pairs.append((i, j))
-    return pairs
+    """Count exact + near-duplicate pairs. Uses hashing for exact, sampling for near."""
+    texts = [extract_human_text(r.get("conversations", [])).strip() for r in rows]
+
+    # Exact duplicates via hash (O(n))
+    from collections import Counter
+    text_counts = Counter(texts)
+    exact_dup_pairs = sum(c * (c - 1) // 2 for c in text_counts.values() if c > 1)
+
+    # Near-duplicates: only compare distinct non-empty texts, cap at 2000
+    distinct = list(set(t for t in texts if t))
+    if len(distinct) > 2000:
+        import random
+        random.seed(42)
+        distinct = random.sample(distinct, 2000)
+
+    near_pairs = 0
+    for i in range(len(distinct)):
+        for j in range(i + 1, len(distinct)):
+            if SequenceMatcher(None, distinct[i], distinct[j]).ratio() > threshold:
+                near_pairs += 1
+
+    return list(range(exact_dup_pairs + near_pairs))  # length = count, used as len() below
 
 
 def count_medical_keywords(text: str) -> int:
@@ -111,14 +125,15 @@ def analyze_file(filepath: str) -> dict:
         return {"file": filepath, "total_samples": 0, "error": "No valid JSONL rows"}
 
     n = len(rows)
+    convs = [r.get("conversations", []) for r in rows]
 
     # Conversation turns
-    turn_counts = [len(r.get("conversations", [])) for r in rows]
+    turn_counts = [len(c) for c in convs]
 
     # Length stats
-    all_text_lens = [len(extract_all_text(r)) for r in rows]
-    human_lens = [len(extract_human_text(r)) for r in rows]
-    gpt_lens = [len(extract_gpt_text(r)) for r in rows]
+    all_text_lens = [len(extract_all_text(c)) for c in convs]
+    human_lens = [len(extract_human_text(c)) for c in convs]
+    gpt_lens = [len(extract_gpt_text(c)) for c in convs]
 
     # Empty / short
     empty_answers = sum(1 for r in rows if has_empty_answer(r))
@@ -131,12 +146,12 @@ def analyze_file(filepath: str) -> dict:
     dup_pairs = find_duplicates(rows)
 
     # Medical keyword coverage
-    human_keyword_counts = [count_medical_keywords(extract_human_text(r)) for r in rows]
-    gpt_keyword_counts = [count_medical_keywords(extract_gpt_text(r)) for r in rows]
+    human_keyword_counts = [count_medical_keywords(extract_human_text(c)) for c in convs]
+    gpt_keyword_counts = [count_medical_keywords(extract_gpt_text(c)) for c in convs]
     medical_ratio = sum(1 for c in human_keyword_counts if c > 0) / n if n > 0 else 0
 
     # Language detection
-    total_text = "".join(extract_human_text(r) for r in rows)
+    total_text = "".join(extract_human_text(c) for c in convs)
     chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', total_text))
     total_chars = len(total_text.replace(" ", "").replace("\n", ""))
     chinese_ratio = chinese_chars / total_chars if total_chars > 0 else 0

@@ -101,6 +101,9 @@ def load_dir(dirpath: str) -> list[dict]:
 
 
 def extract_questions(rows: list[dict]) -> list[str]:
+    """Extract the FIRST human turn from each conversation for dedup.
+    Using all turns from multi-turn conversations inflates the dedup set
+    and causes false positives."""
     qs = []
     for r in rows:
         for turn in r.get("conversations", []):
@@ -108,6 +111,7 @@ def extract_questions(rows: list[dict]) -> list[str]:
             val = turn.get("value", "") if isinstance(turn, dict) else str(turn)
             if role == "human":
                 qs.append(val)
+                break  # Only first human turn per conversation
     return qs
 
 

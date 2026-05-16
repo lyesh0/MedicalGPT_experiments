@@ -139,3 +139,8 @@ outputs/
 *.safetensors
 !requirements.txt
 .DS_Store
+
+# Generated/raw SFT data (regeneratable, may contain false-positive secrets from ShareGPT)
+data/experiments/sft/
+*.pth
+*.pt

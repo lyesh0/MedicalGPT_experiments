@@ -1,134 +1,173 @@
 #!/usr/bin/env python3
 """
-Download SFT datasets from HuggingFace and save as unified JSONL format.
+Download SFT datasets via direct HTTP requests to HF mirror.
+Bypasses huggingface_hub to avoid network issues on cloud instances.
 
 Usage:
     python tools/experiments/download_sft_data.py --use_mirror
-    python tools/experiments/download_sft_data.py --max_samples 3000
-
-Output:
-    data/experiments/sft/medical/  -- medical Q&A datasets
-    data/experiments/sft/general/  -- general conversation datasets
 """
 
 import os
 import json
 import argparse
+import requests
 
 HF_MIRROR = "https://hf-mirror.com"
 
-DATASETS = {
-    "shibing624/medical": {
+DATASETS = [
+    {
+        "repo": "shibing624/medical",
+        "files": [
+            "finetune/train_zh_0.json",
+            "finetune/train_en_1.json",
+        ],
         "max_samples": 5000,
         "category": "medical",
-        "description": "MedicalGPT author's medical QA dataset (finetune split)",
-        "subconfig": "finetune",
+        "description": "MedicalGPT medical QA (finetune)",
     },
-    "shibing624/sharegpt_gpt4": {
-        "max_samples": 5000,
+    {
+        "repo": "shibing624/sharegpt_gpt4",
+        "files": [
+            "sharegpt_gpt4.jsonl",
+            "sharegpt_zh_38K_format.jsonl",
+        ],
+        "max_samples": 10000,
         "category": "general",
-        "description": "ShareGPT GPT-4 multi-turn conversations",
-        "subconfig": None,
+        "description": "ShareGPT GPT-4 conversations (EN + ZH)",
     },
-}
+]
 
 
 def normalize_role(role: str) -> str:
-    role_lower = role.lower().strip()
-    mapping = {
-        "user": "human", "human": "human",
-        "assistant": "gpt", "gpt": "gpt",
-        "system": "system",
-    }
-    return mapping.get(role_lower, role_lower)
+    mapping = {"user": "human", "human": "human", "assistant": "gpt",
+               "gpt": "gpt", "system": "system"}
+    return mapping.get(role.lower().strip(), role.lower().strip())
 
 
-def convert_row(row: dict) -> dict | None:
-    conversations = None
-
+def row_to_conversations(row: dict) -> list | None:
     if "conversations" in row:
         raw = row["conversations"]
         if isinstance(raw, list) and len(raw) > 0:
-            if isinstance(raw[0], dict) and "from" in raw[0] and "value" in raw[0]:
-                conversations = raw
+            convs = []
+            for turn in raw:
+                if isinstance(turn, dict):
+                    r = normalize_role(turn.get("from", turn.get("role", "")))
+                    v = turn.get("value", turn.get("content", ""))
+                    if r and str(v).strip():
+                        convs.append({"from": r, "value": str(v)})
+                elif isinstance(turn, str):
+                    convs.append({"from": "human", "value": turn})
+            if len(convs) >= 2:
+                return convs
 
-    if conversations is None:
-        for qk, ak in [
-            ("question", "answer"), ("input", "output"),
-            ("instruction", "output"), ("prompt", "response"),
-            ("query", "response"),
-        ]:
-            if qk in row and ak in row:
-                conversations = [
-                    {"from": "human", "value": str(row[qk])},
-                    {"from": "gpt", "value": str(row[ak])},
-                ]
-                break
+    for qk, ak in [("instruction", "output"), ("question", "answer"),
+                    ("input", "output"), ("prompt", "response"),
+                    ("query", "response")]:
+        if qk in row and ak in row:
+            human_text = str(row[qk])
+            # Merge optional input/context field with instruction
+            if qk == "instruction" and "input" in row and str(row["input"]).strip():
+                human_text = human_text + "\n" + str(row["input"])
+            return [
+                {"from": "human", "value": human_text},
+                {"from": "gpt", "value": str(row[ak])},
+            ]
 
-    if conversations is None:
-        return None
+    if "messages" in row and isinstance(row["messages"], list):
+        convs = []
+        for m in row["messages"]:
+            if isinstance(m, dict):
+                r = normalize_role(m.get("role", m.get("from", "")))
+                c = m.get("content", m.get("value", ""))
+                if r and str(c).strip():
+                    convs.append({"from": r, "value": str(c)})
+        if len(convs) >= 2:
+            return convs
 
-    normalized = []
-    for turn in conversations:
-        if not isinstance(turn, dict):
-            continue
-        role = normalize_role(turn.get("from", turn.get("role", "")))
-        value = turn.get("value", turn.get("content", ""))
-        if not role or not str(value).strip():
-            continue
-        normalized.append({"from": role, "value": str(value)})
-
-    return {"conversations": normalized} if normalized else None
+    return None
 
 
-def download_dataset(ds_name: str, config: dict, max_samples: int, use_mirror: bool) -> list[dict]:
-    print(f"\n{'='*60}")
-    print(f"Downloading: {ds_name}")
-    print(f"  {config['description']}")
-
-    if use_mirror:
-        os.environ["HF_ENDPOINT"] = HF_MIRROR
-        print(f"  Using mirror: {HF_MIRROR}")
-
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        print("  [ERROR] 'datasets' library not installed. Run: pip install datasets")
+def load_json_file(url: str) -> list[dict]:
+    resp = requests.get(url, timeout=120)
+    resp.raise_for_status()
+    text = resp.text.strip()
+    if not text:
         return []
-
-    limit = min(max_samples, config["max_samples"]) if max_samples else config["max_samples"]
-
-    try:
-        # Use subconfig if specified, with datasets 2.x / 3.x compatibility
-        kwargs = {"path": ds_name, "split": "train"}
-        if config.get("subconfig"):
-            kwargs["name"] = config["subconfig"]
-        try:
-            kwargs["trust_remote_code"] = True
-            ds = load_dataset(**kwargs)
-        except TypeError:
-            del kwargs["trust_remote_code"]
-            ds = load_dataset(**kwargs)
-
-        print(f"  Downloaded {len(ds)} total rows")
-
+    # Try JSONL first (line-delimited JSON objects)
+    lines = text.split("\n")
+    first = lines[0].strip()
+    if first.startswith("{") and first.endswith("}"):
         rows = []
-        failed = 0
-        for i, row in enumerate(ds):
-            if len(rows) >= limit:
-                break
-            conv = convert_row(row)
-            if conv and len(conv["conversations"]) >= 2:
-                rows.append(conv)
-            else:
-                failed += 1
-
-        print(f"  Converted: {len(rows)} valid samples, {failed} skipped")
+        for line in lines:
+            line = line.strip()
+            if line:
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
         return rows
+    # Fall back to single JSON value (array or object)
+    data = json.loads(text)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return [data]
+    return []
 
-    except Exception as e:
-        print(f"  [ERROR] Failed to download {ds_name}: {e}")
-        return []
+
+def load_parquet_url(url: str) -> list[dict]:
+    import io
+    resp = requests.get(url, timeout=300)
+    resp.raise_for_status()
+    try:
+        import pyarrow.parquet as pq
+        return pq.read_table(io.BytesIO(resp.content)).to_pylist()
+    except ImportError:
+        import pandas as pd
+        return pd.read_parquet(io.BytesIO(resp.content)).to_dict("records")
+
+
+def download_dataset(ds: dict, max_samples: int, use_mirror: bool) -> list[dict]:
+    print(f"\n{'='*60}")
+    print(f"Downloading: {ds['repo']}")
+    print(f"  {ds['description']}")
+
+    base = HF_MIRROR if use_mirror else "https://huggingface.co"
+    limit = min(max_samples, ds["max_samples"]) if max_samples else ds["max_samples"]
+    fmt = ds.get("format", "json")
+
+    all_rows = []
+    for file_path in ds["files"]:
+        if len(all_rows) >= limit:
+            break
+        url = f"{base}/datasets/{ds['repo']}/resolve/main/{file_path}"
+        print(f"  Fetching: {url[:80]}...")
+        try:
+            if fmt == "parquet":
+                rows = load_parquet_url(url)
+            else:
+                rows = load_json_file(url)
+            print(f"    Got {len(rows)} rows")
+            all_rows.extend(rows)
+        except Exception as e:
+            print(f"    [WARN] Failed: {e}")
+            continue
+
+    print(f"  Total downloaded: {len(all_rows)} rows")
+
+    converted = []
+    failed = 0
+    for row in all_rows:
+        if len(converted) >= limit:
+            break
+        convs = row_to_conversations(row)
+        if convs and len(convs) >= 2:
+            converted.append({"conversations": convs})
+        else:
+            failed += 1
+
+    print(f"  Converted: {len(converted)} valid, {failed} skipped")
+    return converted
 
 
 def save_jsonl(rows: list[dict], filepath: str):
@@ -140,43 +179,38 @@ def save_jsonl(rows: list[dict], filepath: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Download SFT datasets for MedicalGPT experiments")
-    parser.add_argument("--max_samples", type=int, default=0,
-                        help="Max samples per dataset (0=use built-in limit)")
-    parser.add_argument("--use_mirror", action="store_true",
-                        help="Use hf-mirror.com for China access")
-    parser.add_argument("--output_dir", type=str, default="data/experiments/sft",
-                        help="Output root directory")
-    parser.add_argument("--skip_existing", action="store_true",
-                        help="Skip download if output file exists")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max_samples", type=int, default=0)
+    parser.add_argument("--use_mirror", action="store_true")
+    parser.add_argument("--output_dir", type=str, default="data/experiments/sft")
+    parser.add_argument("--skip_existing", action="store_true")
     args = parser.parse_args()
 
     base = args.output_dir
     all_counts = {}
 
-    for ds_name, cfg in DATASETS.items():
-        out_file = f"{ds_name.replace('/', '_')}.jsonl"
-        out_path = os.path.join(base, cfg["category"], out_file)
+    for ds in DATASETS:
+        out_file = f"{ds['repo'].replace('/', '_')}.jsonl"
+        out_path = os.path.join(base, ds["category"], out_file)
 
         if args.skip_existing and os.path.exists(out_path):
             with open(out_path, encoding="utf-8") as f:
                 count = sum(1 for _ in f)
-            print(f"[SKIP] {ds_name} - already exists ({count} samples)")
-            all_counts[ds_name] = count
+            print(f"[SKIP] {ds['repo']} - {count} samples")
+            all_counts[ds["repo"]] = count
             continue
 
-        rows = download_dataset(ds_name, cfg, args.max_samples or 0, args.use_mirror)
+        rows = download_dataset(ds, args.max_samples or 0, args.use_mirror)
         if not rows:
-            print(f"  [WARNING] No data downloaded for {ds_name}")
+            print(f"  [WARNING] No data for {ds['repo']}")
             continue
-
         save_jsonl(rows, out_path)
-        all_counts[ds_name] = len(rows)
+        all_counts[ds["repo"]] = len(rows)
 
     print(f"\n{'='*60}")
     print("Download Summary:")
-    for ds, count in all_counts.items():
-        print(f"  {ds}: {count} samples")
+    for ds_name, count in all_counts.items():
+        print(f"  {ds_name}: {count} samples")
     print(f"  Total: {sum(all_counts.values())} samples")
 
 

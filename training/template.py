@@ -1,7 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description: 对话模板管理模块
+
+核心思路：
+  不同基座模型（Qwen、LLaMA、ChatGLM...）使用不同的对话格式（ChatML、Alpaca...），
+  需要一个统一的模板系统来将「用户消息 + 助手回复」拼成模型认识的 prompt 字符串。
+
+  这个模块定义了：
+  1. Conversation 数据类 —— 持有单个模板的所有信息
+  2. conv_templates 全局字典 —— 注册所有已知模板
+  3. register_conv_template() —— 注册新模板
+  4. get_conv_template() —— 按名称取模板
+ 
+  使用流程：
+    template = get_conv_template("qwen")
+    dialog_parts = template.get_dialog(messages=[["问题1", "回答1"], ["问题2", "回答2"]])
+    # 得到 ["<|im_start|>user\n问题1<|im_end|>\n<|im_start|>assistant\n", "回答1", ...]
 """
 
 from dataclasses import dataclass
@@ -12,22 +27,30 @@ __all__ = ['Conversation', 'register_conv_template', 'get_conv_template']
 
 @dataclass
 class Conversation:
+    """
+    一个提示模板的完整定义。
+
+    核心字段说明：
+      name          : 模板名称，如 "qwen", "llama3"
+      system_prompt : 系统提示词（角色设定）
+      prompt        : 单轮用户问题模板，用 {query} 占位
+      sep           : 分隔符（通常是 eos_token）
+      stop_str      : 停止生成的标记
+
+    两个核心方法：
+      get_prompt()  → 返回纯字符串，用于推理时拼接 prompt
+      get_dialog()  → 返回字符串列表 [query1, response1, query2, response2, ...]
+                       训练时需要分别拿到 query 和 response 来计算 loss
+    """
     """A class that manages prompt templates and keeps all conversation history."""
 
-    # The name of this template
-    name: str
-    # The system prompt
-    system_prompt: str
-    # All messages. format: list of [question, answer]
-    messages: Optional[List[Sequence[str]]]
-    # The roles of the speakers
-    roles: Optional[Sequence[str]]
-    # Conversation prompt
-    prompt: str
-    # Separator
-    sep: str
-    # Stop token, default is tokenizer.eos_token
-    stop_str: Optional[str] = "</s>"
+    name: str                                          # 模板名称
+    system_prompt: str                                # 系统提示词
+    messages: Optional[List[Sequence[str]]]           # 历史对话，格式: [[问题, 回答], ...]
+    roles: Optional[Sequence[str]]                    # 对话角色名，如 ("USER", "ASSISTANT")
+    prompt: str                                       # 单轮用户提问模板，{query} 会被替换为实际输入
+    sep: str                                          # 轮次分隔符，如 "</s>"、"\n"
+    stop_str: Optional[str] = "</s>"                  # 停止标记，推理时遇到此标记停止生成
 
     def get_prompt(
             self,
@@ -35,7 +58,8 @@ class Conversation:
             system_prompt: Optional[str] = ""
     ) -> str:
         """
-        Returns a string containing prompt without response.
+        返回拼接后的完整 prompt 字符串（不含回复内容）。
+        用于推理阶段：把 prompt 喂给模型，让模型接着生成。
         """
         return "".join(self._format_example(messages, system_prompt))
 
@@ -45,7 +69,12 @@ class Conversation:
             system_prompt: Optional[str] = ""
     ) -> List[str]:
         """
-        Returns a list containing 2 * n elements where the 2k-th is a query and the (2k+1)-th is a response.
+        返回一个字符串列表，偶数位是格式化后的 query，奇数位是对应的 response。
+        用于训练阶段：需要分别拿到每个 query 和 response 来做 tokenize 和 loss 计算。
+
+        示例返回：
+          ["<|im_start|>user\n你好<|im_end|>\n<|im_start|>assistant\n",  # query
+           "你好！有什么可以帮你的？"]                                      # response
         """
         return self._format_example(messages, system_prompt)
 
@@ -54,8 +83,17 @@ class Conversation:
             messages: Optional[List[Sequence[str]]] = None,
             system_prompt: Optional[str] = ""
     ) -> List[str]:
+        """
+        将多轮对话格式化为 [query1, response1, query2, response2, ...] 列表。
+
+        格式化逻辑：
+          - 第 0 轮：system_prompt + "USER: {query} ASSISTANT:"  → query1，然后 response1
+          - 第 1+ 轮：sep + "USER: {query} ASSISTANT:"            → query2，然后 response2
+
+        关键：每轮的 query 都以分隔符结尾（如 "</s>"），这样模型知道一轮对话的边界。
+        """
         system_prompt = system_prompt or self.system_prompt
-        system_prompt = system_prompt + self.sep if system_prompt else ""  # add separator for non-empty system prompt
+        system_prompt = system_prompt + self.sep if system_prompt else ""  # 非空 system_prompt 后面加分隔符
         messages = messages or self.messages
         convs = []
         if not messages:
@@ -74,18 +112,27 @@ class Conversation:
         self.messages.append([query, answer])
 
 
-# A global registry for all conversation templates
+# ============================================================================
+# 全局模板注册表 —— conv_templates 字典存所有已注册的模板
+# 用 register_conv_template() 注册新模板，用 get_conv_template(name) 按名称取模板
+# ============================================================================
 conv_templates: Dict[str, Conversation] = {}
 
 
 def register_conv_template(template: Conversation):
-    """Register a new conversation template."""
+    """将模板注册到全局字典。在文件末尾调用，一次性注册所有已知模板。"""
     conv_templates[template.name] = template
 
 
+# ============================================================================
+# 以下是所有预定义的对话模板
+# 每个模板对应一种基座模型的 prompt 格式
+# 关键区别在于 prompt 字段中用 {query} 占位符和 sep 分隔符的组合方式
+# ============================================================================
+
 """Vicuna v1.1 template
 Supports: https://huggingface.co/lmsys/vicuna-7b-delta-v1.1
-          https://huggingface.co/lmsys/vicuna-13b-delta-v1.1
+Format: USER: {query} ASSISTANT: {response}</s>
 """
 register_conv_template(
     Conversation(
@@ -99,7 +146,7 @@ register_conv_template(
     )
 )
 
-"""Base model template, for few shot"""
+"""Base model template, for few shot — 无格式，直接拼接原始文本"""
 register_conv_template(
     Conversation(
         name="base",
@@ -529,11 +576,17 @@ register_conv_template(
 )
 
 """Qwen template (ChatML format)
-source: https://huggingface.co/Qwen/CodeQwen1.5-7B-Chat/blob/main/tokenizer_config.json#L18
-Supports: https://huggingface.co/Qwen/CodeQwen1.5-7B-Chat
-          https://huggingface.co/Qwen/Qwen1.5-72B-Chat
-          https://huggingface.co/Qwen/Qwen2-72B
-          https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct
+通用 Qwen 系列模板，使用 ChatML 格式。
+
+ChatML 格式示例：
+  <|im_start|>system
+  You are a helpful assistant.<|im_end|>
+  <|im_start|>user
+  {query}<|im_end|>
+  <|im_start|>assistant
+  {response}<|im_end|>
+
+本项目使用 qwen3_5 模板（Qwen3.5 也是 ChatML 格式，字段一致）。
 """
 register_conv_template(
     Conversation(
@@ -583,13 +636,8 @@ register_conv_template(
 )
 
 """Qwen3.5 template (ChatML format with thinking support)
-Supports: https://huggingface.co/Qwen/Qwen3.5-0.8B-Base
-          https://huggingface.co/Qwen/Qwen3.5-3B
-          https://huggingface.co/Qwen/Qwen3.5-8B
-          https://huggingface.co/Qwen/Qwen3.5-32B
-          https://huggingface.co/Qwen/Qwen3.5-72B
-          https://huggingface.co/Qwen/Qwen3.5-397B-A17B
-Qwen3.5 uses the same ChatML format as Qwen3, with reasoning/thinking support.
+本项目实际使用的模板。Qwen3.5 使用与 Qwen 系列相同的 ChatML 格式。
+基座模型 Qwen3.5-2B 位于 /root/autodl-tmp/models/Qwen3.5-2B
 """
 register_conv_template(
     Conversation(
@@ -603,22 +651,7 @@ register_conv_template(
     )
 )
 
-"""Qwen3.5 no-think template
-Use this template to disable thinking mode for Qwen3.5 models.
-"""
-register_conv_template(
-    Conversation(
-        name="qwen3_5_nothink",
-        system_prompt="<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n",
-        messages=[],
-        roles=("user", "assistant"),
-        prompt="<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n",
-        sep="\n",
-        stop_str="<|im_end|>",
-    )
-)
-
 
 def get_conv_template(name: str) -> Conversation:
-    """Get a conversation template."""
+    """按名称获取已注册的对话模板。例如 get_conv_template("qwen3_5")"""
     return conv_templates[name]
