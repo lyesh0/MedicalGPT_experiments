@@ -1,0 +1,542 @@
+[
+  {
+    "model": "SFT-C",
+    "file": "outputs/experiments/predictions/sft_C_predictions.jsonl",
+    "overall": {
+      "avg_safety": 0.54,
+      "avg_danger_penalty": 1.0,
+      "avg_completeness": 0.2,
+      "avg_validity": 0.96,
+      "avg_length": 480.7,
+      "danger_suggestion_rate": 0.0,
+      "uncertainty_rate": 0.0,
+      "high_risk_escalation_rate": 0.167,
+      "composite": 0.548,
+      "total_samples": 50
+    },
+    "per_category": {
+      "就医": {
+        "samples": 7,
+        "avg_safety": 0.333,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.0,
+        "avg_validity": 1.0,
+        "avg_length": 500.9,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.417
+      },
+      "常见病": {
+        "samples": 10,
+        "avg_safety": 0.783,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.333,
+        "avg_validity": 1.0,
+        "avg_length": 421.6,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.624
+      },
+      "急症": {
+        "samples": 10,
+        "avg_safety": 0.6,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.3,
+        "avg_validity": 0.9,
+        "avg_length": 413.3,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.4,
+        "composite": 0.625
+      },
+      "慢病": {
+        "samples": 8,
+        "avg_safety": 0.416,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.083,
+        "avg_validity": 1.0,
+        "avg_length": 649.4,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.125,
+        "composite": 0.483
+      },
+      "用药": {
+        "samples": 10,
+        "avg_safety": 0.4,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.233,
+        "avg_validity": 1.0,
+        "avg_length": 543.3,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.1,
+        "composite": 0.495
+      },
+      "通用": {
+        "samples": 5,
+        "avg_safety": 0.7,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.133,
+        "avg_validity": 0.8,
+        "avg_length": 310.8,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.545
+      }
+    }
+  },
+  {
+    "model": "DPO",
+    "file": "outputs/experiments/predictions/dpo_predictions.jsonl",
+    "overall": {
+      "avg_safety": 0.77,
+      "avg_danger_penalty": 1.0,
+      "avg_completeness": 0.793,
+      "avg_validity": 1.0,
+      "avg_length": 860.6,
+      "danger_suggestion_rate": 0.0,
+      "uncertainty_rate": 0.04,
+      "high_risk_escalation_rate": 0.583,
+      "composite": 0.805,
+      "total_samples": 50
+    },
+    "per_category": {
+      "就医": {
+        "samples": 7,
+        "avg_safety": 0.714,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.81,
+        "avg_validity": 1.0,
+        "avg_length": 882.6,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.571,
+        "composite": 0.786
+      },
+      "常见病": {
+        "samples": 10,
+        "avg_safety": 0.95,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.9,
+        "avg_validity": 1.0,
+        "avg_length": 873.1,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.1,
+        "high_risk_escalation_rate": 1.0,
+        "composite": 0.968
+      },
+      "急症": {
+        "samples": 10,
+        "avg_safety": 0.666,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.767,
+        "avg_validity": 1.0,
+        "avg_length": 836.3,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.5,
+        "composite": 0.748
+      },
+      "慢病": {
+        "samples": 8,
+        "avg_safety": 0.5,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.625,
+        "avg_validity": 1.0,
+        "avg_length": 892.0,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.25,
+        "composite": 0.619
+      },
+      "用药": {
+        "samples": 10,
+        "avg_safety": 0.933,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.933,
+        "avg_validity": 1.0,
+        "avg_length": 874.9,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.9,
+        "composite": 0.947
+      },
+      "通用": {
+        "samples": 5,
+        "avg_safety": 0.8,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.6,
+        "avg_validity": 1.0,
+        "avg_length": 774.8,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.2,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.67
+      }
+    }
+  },
+  {
+    "model": "RLOO",
+    "file": "outputs/experiments/predictions/rloo_predictions.jsonl",
+    "overall": {
+      "avg_safety": 0.493,
+      "avg_danger_penalty": 1.0,
+      "avg_completeness": 0.18,
+      "avg_validity": 0.92,
+      "avg_length": 483.6,
+      "danger_suggestion_rate": 0.0,
+      "uncertainty_rate": 0.0,
+      "high_risk_escalation_rate": 0.111,
+      "composite": 0.514,
+      "total_samples": 50
+    },
+    "per_category": {
+      "就医": {
+        "samples": 7,
+        "avg_safety": 0.333,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.0,
+        "avg_validity": 1.0,
+        "avg_length": 550.1,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.417
+      },
+      "常见病": {
+        "samples": 10,
+        "avg_safety": 0.733,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.3,
+        "avg_validity": 1.0,
+        "avg_length": 446.3,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.602
+      },
+      "急症": {
+        "samples": 10,
+        "avg_safety": 0.466,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.267,
+        "avg_validity": 0.8,
+        "avg_length": 378.9,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.2,
+        "composite": 0.523
+      },
+      "慢病": {
+        "samples": 8,
+        "avg_safety": 0.416,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.083,
+        "avg_validity": 1.0,
+        "avg_length": 485.5,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.125,
+        "composite": 0.483
+      },
+      "用药": {
+        "samples": 10,
+        "avg_safety": 0.4,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.233,
+        "avg_validity": 1.0,
+        "avg_length": 647.0,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.1,
+        "composite": 0.495
+      },
+      "通用": {
+        "samples": 5,
+        "avg_safety": 0.6,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.067,
+        "avg_validity": 0.6,
+        "avg_length": 344.4,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.48
+      }
+    }
+  },
+  {
+    "model": "GRPO-v1",
+    "file": "outputs/experiments/predictions/grpo_predictions.jsonl",
+    "overall": {
+      "avg_safety": 0.57,
+      "avg_danger_penalty": 1.0,
+      "avg_completeness": 0.233,
+      "avg_validity": 0.96,
+      "avg_length": 550.3,
+      "danger_suggestion_rate": 0.0,
+      "uncertainty_rate": 0.0,
+      "high_risk_escalation_rate": 0.25,
+      "composite": 0.58,
+      "total_samples": 50
+    },
+    "per_category": {
+      "就医": {
+        "samples": 7,
+        "avg_safety": 0.333,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.0,
+        "avg_validity": 1.0,
+        "avg_length": 704.6,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.417
+      },
+      "常见病": {
+        "samples": 10,
+        "avg_safety": 0.783,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.333,
+        "avg_validity": 1.0,
+        "avg_length": 443.3,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.624
+      },
+      "急症": {
+        "samples": 10,
+        "avg_safety": 0.533,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.233,
+        "avg_validity": 0.9,
+        "avg_length": 466.2,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.3,
+        "composite": 0.571
+      },
+      "慢病": {
+        "samples": 8,
+        "avg_safety": 0.583,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.208,
+        "avg_validity": 1.0,
+        "avg_length": 662.5,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.375,
+        "composite": 0.61
+      },
+      "用药": {
+        "samples": 10,
+        "avg_safety": 0.533,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.4,
+        "avg_validity": 1.0,
+        "avg_length": 610.0,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.3,
+        "composite": 0.607
+      },
+      "通用": {
+        "samples": 5,
+        "avg_safety": 0.6,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.067,
+        "avg_validity": 0.8,
+        "avg_length": 417.8,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.5
+      }
+    }
+  },
+  {
+    "model": "GRPO-v2",
+    "file": "outputs/experiments/predictions/grpo_v2_predictions.jsonl",
+    "overall": {
+      "avg_safety": 0.566,
+      "avg_danger_penalty": 1.0,
+      "avg_completeness": 0.24,
+      "avg_validity": 0.94,
+      "avg_length": 528.9,
+      "danger_suggestion_rate": 0.0,
+      "uncertainty_rate": 0.0,
+      "high_risk_escalation_rate": 0.222,
+      "composite": 0.573,
+      "total_samples": 50
+    },
+    "per_category": {
+      "就医": {
+        "samples": 7,
+        "avg_safety": 0.333,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.0,
+        "avg_validity": 1.0,
+        "avg_length": 442.4,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.417
+      },
+      "常见病": {
+        "samples": 10,
+        "avg_safety": 0.783,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.367,
+        "avg_validity": 1.0,
+        "avg_length": 485.6,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.629
+      },
+      "急症": {
+        "samples": 10,
+        "avg_safety": 0.6,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.333,
+        "avg_validity": 0.9,
+        "avg_length": 479.7,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.4,
+        "composite": 0.63
+      },
+      "慢病": {
+        "samples": 8,
+        "avg_safety": 0.5,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.125,
+        "avg_validity": 1.0,
+        "avg_length": 662.9,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.25,
+        "composite": 0.544
+      },
+      "用药": {
+        "samples": 10,
+        "avg_safety": 0.466,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.333,
+        "avg_validity": 1.0,
+        "avg_length": 679.7,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.2,
+        "composite": 0.553
+      },
+      "通用": {
+        "samples": 5,
+        "avg_safety": 0.7,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.133,
+        "avg_validity": 0.6,
+        "avg_length": 319.0,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.525
+      }
+    }
+  },
+  {
+    "model": "GRPO-v3",
+    "file": "outputs/experiments/predictions/grpo_v3_predictions.jsonl",
+    "overall": {
+      "avg_safety": 0.543,
+      "avg_danger_penalty": 1.0,
+      "avg_completeness": 0.213,
+      "avg_validity": 0.94,
+      "avg_length": 245.3,
+      "danger_suggestion_rate": 0.0,
+      "uncertainty_rate": 0.0,
+      "high_risk_escalation_rate": 0.194,
+      "composite": 0.555,
+      "total_samples": 50
+    },
+    "per_category": {
+      "就医": {
+        "samples": 7,
+        "avg_safety": 0.333,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.0,
+        "avg_validity": 1.0,
+        "avg_length": 278.7,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.417
+      },
+      "常见病": {
+        "samples": 10,
+        "avg_safety": 0.85,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.333,
+        "avg_validity": 1.0,
+        "avg_length": 206.1,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 1.0,
+        "composite": 0.847
+      },
+      "急症": {
+        "samples": 10,
+        "avg_safety": 0.533,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.267,
+        "avg_validity": 0.9,
+        "avg_length": 186.4,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.3,
+        "composite": 0.577
+      },
+      "慢病": {
+        "samples": 8,
+        "avg_safety": 0.5,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.25,
+        "avg_validity": 1.0,
+        "avg_length": 296.5,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.25,
+        "composite": 0.562
+      },
+      "用药": {
+        "samples": 10,
+        "avg_safety": 0.4,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.233,
+        "avg_validity": 1.0,
+        "avg_length": 320.4,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.1,
+        "composite": 0.495
+      },
+      "通用": {
+        "samples": 5,
+        "avg_safety": 0.6,
+        "avg_danger_penalty": 1.0,
+        "avg_completeness": 0.067,
+        "avg_validity": 0.6,
+        "avg_length": 163.0,
+        "danger_suggestion_rate": 0.0,
+        "uncertainty_rate": 0.0,
+        "high_risk_escalation_rate": 0.0,
+        "composite": 0.48
+      }
+    }
+  }
+]

@@ -1,0 +1,4 @@
+model,avg_safety,avg_danger_penalty,high_risk_escalation_rate,avg_completeness,avg_validity,danger_suggestion_rate,avg_length,composite
+GRPO-7B,0.826,0.988,0.667,0.74,1.0,0.02,419.9,0.831
+SFT-7B-C,0.811,0.988,0.611,0.74,1.0,0.02,399.1,0.815
+DPO-7B,0.799,0.988,0.611,0.74,1.0,0.02,403.7,0.81

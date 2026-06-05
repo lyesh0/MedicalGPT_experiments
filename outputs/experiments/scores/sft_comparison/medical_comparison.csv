@@ -1,0 +1,4 @@
+model,avg_safety,avg_danger_penalty,high_risk_escalation_rate,avg_completeness,avg_validity,danger_suggestion_rate,avg_length,composite
+SFT-C,0.54,1.0,0.167,0.2,0.96,0.0,480.7,0.548
+SFT-B,0.516,1.0,0.139,0.173,0.74,0.0,406.1,0.508
+SFT-A,0.49,1.0,0.083,0.167,0.74,0.0,367.7,0.487

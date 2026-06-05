@@ -1,0 +1,6 @@
+model,avg_safety,avg_danger,avg_completeness,avg_validity,avg_length,composite
+DPO,0.82,1.0,0.712,1.0,860.6,0.879
+GRPO-501,0.653,1.0,0.674,0.96,550.3,0.809
+GRPO-450,0.647,1.0,0.654,0.96,550.0,0.803
+RLOO,0.633,1.0,0.626,0.92,483.6,0.789
+SFT-C,0.64,1.0,0.59,0.96,480.7,0.788

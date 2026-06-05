@@ -180,15 +180,43 @@ cd /root/autodl-tmp/MedicalGPT_experiments
 
 ## 实验进度速查
 
-| 阶段 | 状态 | 关键结果 |
-|------|------|---------|
-| SFT 消融 (A/B/C) | ✅ 完成 | best=SFT-C |
-| 医疗偏好数据 | ✅ 完成 | 250对 |
-| DPO-Medical | ✅ 完成 | safety 0.64→0.83 |
-| RM + RLOO | ⏳ 待做 | |
-| GRPO Safety | ⏳ 待做 | |
-| LLM Judge 评测 | ⏳ 待做 | |
+| 阶段 | 2B 状态 | 7B 状态 | 关键结果 |
+|------|---------|---------|---------|
+| SFT 消融 (A/B/C) | ✅ 完成 | ✅ 完成 | both best=C |
+| 医疗偏好数据 | ✅ 完成 | ✅ 复用 | 250对 |
+| DPO-Medical | ✅ 完成 | ✅ 完成 | 2B: 0.64→0.83; 7B: LLM Judge 6.58 |
+| RM 训练 | ✅ 完成 | ✅ 完成 | 2B MAE=0.65; 7B MAE=1.77(差) |
+| RLOO | ✅ 完成 | ❌ 失败 | 7B RM 基座选错→负reward→放弃 |
+| GRPO Safety | ✅ 完成 | ✅ 完成 | 7B: 规则评分 0.831, 用药满分 |
+| LLM Judge 评测 | ✅ 完成 | ✅ 完成 | DeepSeek V4 Flash, 5维度评分 |
 
 ---
 
-*最后更新: 2026-05-12*
+*最后更新: 2026-05-27*
+
+---
+
+## 实验教训
+
+### #1: 7B RLOO 失败 — RM 基座选择
+
+**现象**: 7B RLOO 训练 100 步，96 步 reward 为负，训练放弃。
+
+**根因链**:
+1. 7B RM 的基座用了 `sft_7b_C_merged`（已指令微调），而非原始 pretrained 模型
+2. SFT 表示已为「生成」优化，接 reward head 做「判别」产生表示偏差
+3. 仅 250 对数据 × 2 epoch 在 7B 上严重过拟合 → MAE 1.77（2B 的 2.7 倍）
+4. RM 训完**未验证**（没跑 `score_reward_model.py`）就直接进 RLOO
+5. RM 给 SFT-C 的输出系统性地打负分 → RLOO 无正梯度信号
+
+**正确做法**:
+- RM 应从 **pretrained 基座** 初始化，SFT 适配器通过 PEFT 分离加载（2B 的做法）
+- 如果用 SFT merged 做基座，需要更多偏好数据（千级+）来克服表示偏差
+- RM 训完**必须先验证**（pairwise accuracy / score distribution），不合格不进 RL
+
+### #2: 2B vs 7B 实验对比
+
+两套实验独立并行跑完：2B (Qwen3.5-2B, LoRA) 和 7B (Qwen2.5-7B-Instruct, QLoRA 4bit)。
+- DPO 在 LLM Judge 下赢回答质量 (7B: 6.58)，GRPO 在规则评分下赢安全合规 (7B: 0.831)
+- 7B 相比 2B 的提升有限，2B 的完整度反而更高（RLOO 成功、三个 GRPO 版本迭代）
+- 就医类别是所有模型的最短板 (safety 仅 0.33-0.43)

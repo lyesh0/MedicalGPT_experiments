@@ -1,5 +1,27 @@
 # MedicalGPT 医疗后训练实验项目实施文档
 
+> **执行状态**（最后更新: 2026-05-27）
+
+| 阶段 | 2B (Qwen3.5-2B, LoRA) | 7B (Qwen2.5-7B-Instruct, QLoRA 4bit) |
+|------|------------------------|---------------------------------------|
+| SFT 消融 A/B/C | ✅ 完成，选 C | ✅ 完成，选 C |
+| 医疗偏好数据 | ✅ 250对 | ✅ 复用 |
+| DPO Medical | ✅ safety 0.64→0.83 | ✅ LLM Judge 6.58 |
+| RM 训练 | ✅ MAE 0.65 | ✅ MAE 1.77（差） |
+| RLOO | ✅ reward +0.15 | ❌ RM 基座选错，reward 持续为负 |
+| GRPO Safety | ✅ 三个版本迭代 | ✅ 规则评分 0.831 |
+| LLM Judge 评测 | ✅ 5维度评分 | ✅ DeepSeek V4 Flash |
+| 最终横评报告 | ⏳ 待写 | ⏳ 待写 |
+
+**与原计划的主要偏差**：
+- 实际跑了两个模型尺度（2B + 7B），而非原计划的单一小模型
+- 7B 用了 Qwen2.5-7B-Instruct（非 Qwen3.5 系列），因为 Qwen3.5-7B 不可用
+- 7B RLOO 失败（详见 LEARNING_LOG.md 教训 #1）
+- GRPO 只保留了 Safety 组，未做 Format-Only 对照
+- SFT 消融在 7B 上仅跑 C 组（最佳配比），未重复 A/B
+
+---
+
 ## Summary
 
 目标是把 MedicalGPT 改造成一个可写进简历的完整实验项目：先做 SFT 数据配比消融，选出最好的 SFT model；再基于该模型做 DPO、RM+RLOO、GRPO safety reward 对比，验证不同后训练方法对医疗问答安全性、完整性和偏好对齐效果的影响。

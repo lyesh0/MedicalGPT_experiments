@@ -1,0 +1,20 @@
+{
+  "model_path": "outputs/experiments/models/rm_medical",
+  "num_pairs": 250,
+  "pairwise_accuracy": 0.956,
+  "chosen_reward_mean": 0.2844052734375,
+  "chosen_reward_std": 0.4412634574512987,
+  "rejected_reward_mean": -0.3845263671875,
+  "rejected_reward_std": 0.47450544533956457,
+  "reward_diff_mean": 0.668931640625,
+  "reward_diff_std": 0.5236197659797097,
+  "near_zero_ratio": 0.152,
+  "per_category": {
+    "unknown": {
+      "count": 250,
+      "accuracy": 0.956,
+      "chosen_mean": 0.2844052734375,
+      "rejected_mean": -0.3845263671875
+    }
+  }
+}

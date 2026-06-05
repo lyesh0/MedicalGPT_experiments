@@ -134,13 +134,15 @@ dmypy.json
 outputs-dpo-qwen-v1/
 cache/
 outputs-*/
-outputs/
 *.bin
 *.safetensors
 !requirements.txt
 .DS_Store
 
-# Generated/raw SFT data (regeneratable, may contain false-positive secrets from ShareGPT)
-data/experiments/sft/
+# Model weights and checkpoints (too large for git, use HuggingFace or re-train)
+outputs/experiments/models/
 *.pth
 *.pt
+
+# Generated/raw SFT data (regeneratable, may contain false-positive secrets from ShareGPT)
+data/experiments/sft/
